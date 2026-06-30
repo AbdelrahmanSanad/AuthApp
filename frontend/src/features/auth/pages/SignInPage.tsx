@@ -44,7 +44,7 @@ export function SignInPage() {
           error={errors.password?.message}
           {...register('password')}
         />
-        <Button type="submit" isLoading={isBusy}>
+        <Button type="submit" variant="primary" fullWidth loading={isBusy}>
           Sign in
         </Button>
       </form>

@@ -51,7 +51,7 @@ export function SignUpPage() {
           error={errors.password?.message}
           {...register('password')}
         />
-        <Button type="submit" isLoading={isBusy}>
+        <Button type="submit" variant="primary" fullWidth loading={isBusy}>
           Create account
         </Button>
       </form>

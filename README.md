@@ -18,6 +18,8 @@ A full-stack authentication application: sign up, sign in, and a protected page 
 - Passwords hashed with **Argon2id**; refresh-token hashes stored for rotation/revocation
 - Protected `/auth/me` endpoint guarded by `JwtAuthGuard`
 - Route protection on the front end, redirect of authenticated users, **automatic silent access-token refresh** and redirect to sign-in when the refresh token expires
+- **Light / dark theme** with a toggle, OS-preference detection, persistence, and no flash on load
+- Reusable, strongly-typed **`Button`** with CVA variants (`primary` / `secondary` / `outline` / `danger`)
 - Security baseline: Helmet, CORS, global rate limiting, global validation & exception handling
 - Swagger docs, health probe, unit tests, Docker, CI
 
@@ -157,16 +159,17 @@ easygenerator/
 │       ├── config/                 # env loading + validation
 │       ├── common/filters/         # global exception filter
 │       └── modules/
-│           ├── auth/               # controller, service, DTOs, strategy, guard, hashing
+│           ├── auth/               # controller, service, DTOs, strategies, guards, hashing
 │           ├── users/              # schema + data-access service
 │           └── health/             # health controller
 ├── frontend/
 │   └── src/
-│       ├── lib/                    # axios instance, token storage, query client
-│       ├── components/ui/          # reusable presentational components
+│       ├── lib/                    # axios instance, in-memory token store, cn(), query client
+│       ├── components/ui/          # reusable components (Button + CVA variants, TextField, ThemeToggle…)
 │       ├── routes/                 # route guards + path constants
 │       └── features/
 │           ├── auth/               # api, schemas, context, hooks, pages
+│           ├── theme/              # ThemeProvider, context, useTheme
 │           └── home/               # protected application page
 ├── docker-compose.yml
 └── .github/workflows/ci.yml
@@ -188,6 +191,8 @@ easygenerator/
   - On reload the access token is gone, so the app **bootstraps the session from the refresh cookie**.
   - _Tradeoff:_ a single refresh token per user (one active session) keeps the model simple; multi-device sessions would need a sessions collection. Concurrent refreshes from multiple tabs can trip reuse detection — acceptable for this scope.
 - **Validation shared in spirit across the stack.** Zod on the client mirrors the class-validator rules on the server, so users get instant feedback while the server stays the source of truth.
+- **UI variants via CVA + `tailwind-merge`.** The `Button` keeps all styling in one `cva` config keyed by variant — adding a variant is a one-line change with no conditional branching (open/closed). A `cn()` helper merges classes so a caller's `className` always wins. Styling lives in a separate `button-variants.ts` module so the component file stays Fast-Refresh friendly.
+- **Theming via a `ThemeProvider` + Context.** Initial theme comes from `localStorage`, falling back to `prefers-color-scheme`; it is applied with Tailwind's `class` strategy on `<html>` and persisted. An inline boot script in `index.html` sets the class before paint to avoid a flash of the wrong theme. The context value is memoized to avoid unnecessary re-renders. _(The theme preference is non-sensitive, so `localStorage` is appropriate here — unlike the auth tokens.)_
 - **Global `ValidationPipe` + exception filter** guarantee a single, predictable request-validation and error-response shape everywhere.
 
 See [AI.md](AI.md) for how AI tooling was used during development.
