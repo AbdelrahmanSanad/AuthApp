@@ -21,8 +21,14 @@ services:
       PORT: 3000
       CORS_ORIGIN: http://localhost:8080
       MONGODB_URI: mongodb://mongo:27017/easygenerator
-      JWT_SECRET: ${JWT_SECRET:-please-change-this-secret-in-production}
-      JWT_EXPIRES_IN: 1h
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-this-access-secret-in-production}
+      JWT_ACCESS_EXPIRES_IN_MINUTES: 15
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-this-refresh-secret-in-production}
+      JWT_REFRESH_EXPIRES_IN_DAYS: 7
+      # Demo runs over plain HTTP on localhost, so secure cookies are disabled.
+      # Behind HTTPS set COOKIE_SECURE=true (and COOKIE_SAMESITE=none if cross-site).
+      COOKIE_SECURE: 'false'
+      COOKIE_SAMESITE: lax
       THROTTLE_TTL: 60000
       THROTTLE_LIMIT: 100
     ports:

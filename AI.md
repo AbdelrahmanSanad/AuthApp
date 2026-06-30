@@ -16,7 +16,8 @@ The project was developed with an AI pair-programming workflow: I described the 
 
 ### Written / corrected manually
 
-- **Architecture decisions** — module boundaries (`auth` vs `users`), the no-refresh-token scope call, and the `localStorage`-vs-cookie tradeoff were decided deliberately, not by the AI.
+- **Architecture decisions** — module boundaries (`auth` vs `users`), the access/refresh token strategy (in-memory access token + rotating `HttpOnly` refresh cookie with hash-based reuse detection), and the single-session tradeoff were decided deliberately, not by the AI.
+- **Security-sensitive flow logic** — refresh-token rotation, reuse detection, the single-flight Axios refresh interceptor, and cookie flags (`HttpOnly`/`Secure`/`SameSite`, scoping the cookie to `/api/auth`) were reviewed and verified end-to-end with cookie-jar tests rather than trusted as generated.
 - **Type-level fixes** that the AI's first drafts got wrong, caught by the compiler:
   - JWT `expiresIn` typing clash with `@nestjs/jwt`'s `StringValue` — required an explicit cast.
   - Vite/Vitest type conflict from Vitest bundling its own Vite copy — fixed by aligning Vitest to v3 (Vite 6 peer).

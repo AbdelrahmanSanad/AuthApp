@@ -14,9 +14,10 @@ A full-stack authentication application: sign up, sign in, and a protected page 
 
 - Email / name / password sign up with strong password policy
 - Email / password sign in
-- JWT access tokens, passwords hashed with **Argon2id**
+- **Access + refresh token flow:** short-lived JWT access token (in memory) + long-lived refresh token in an `HttpOnly` cookie, with rotation on every refresh
+- Passwords hashed with **Argon2id**; refresh-token hashes stored for rotation/revocation
 - Protected `/auth/me` endpoint guarded by `JwtAuthGuard`
-- Route protection on the front end, redirect of authenticated users, graceful handling of expired tokens
+- Route protection on the front end, redirect of authenticated users, **automatic silent access-token refresh** and redirect to sign-in when the refresh token expires
 - Security baseline: Helmet, CORS, global rate limiting, global validation & exception handling
 - Swagger docs, health probe, unit tests, Docker, CI
 
@@ -78,16 +79,20 @@ npm run dev                 # http://localhost:5173
 
 ### Backend (`backend/.env`)
 
-| Variable          | Required | Default                 | Description                                   |
-| ----------------- | -------- | ----------------------- | --------------------------------------------- |
-| `NODE_ENV`        | no       | `development`           | Runtime environment                           |
-| `PORT`            | no       | `3000`                  | HTTP port                                     |
-| `CORS_ORIGIN`     | no       | `http://localhost:5173` | Comma-separated list of allowed origins       |
-| `MONGODB_URI`     | **yes**  | —                       | MongoDB connection string                     |
-| `JWT_SECRET`      | **yes**  | —                       | JWT signing secret (min 16 chars)             |
-| `JWT_EXPIRES_IN`  | no       | `1h`                    | Access token lifetime                         |
-| `THROTTLE_TTL`    | no       | `60000`                 | Rate-limit window in milliseconds             |
-| `THROTTLE_LIMIT`  | no       | `100`                   | Max requests per window per IP                |
+| Variable                        | Required | Default                 | Description                                              |
+| ------------------------------- | -------- | ----------------------- | ------------------------------------------------------- |
+| `NODE_ENV`                      | no       | `development`           | Runtime environment                                     |
+| `PORT`                          | no       | `3000`                  | HTTP port                                               |
+| `CORS_ORIGIN`                   | no       | `http://localhost:5173` | Comma-separated allowed origins (exact, for cookies)    |
+| `MONGODB_URI`                   | **yes**  | —                       | MongoDB connection string                               |
+| `JWT_ACCESS_SECRET`             | **yes**  | —                       | Access-token signing secret (min 16 chars)              |
+| `JWT_ACCESS_EXPIRES_IN_MINUTES` | no       | `15`                    | Access-token lifetime in minutes                        |
+| `JWT_REFRESH_SECRET`            | **yes**  | —                       | Refresh-token signing secret (min 16 chars, different)  |
+| `JWT_REFRESH_EXPIRES_IN_DAYS`   | no       | `7`                     | Refresh-token lifetime in days                          |
+| `COOKIE_SECURE`                 | no       | `true` in prod          | Send the refresh cookie only over HTTPS                 |
+| `COOKIE_SAMESITE`               | no       | `lax`                   | Refresh cookie `SameSite` (`lax`/`strict`/`none`)       |
+| `THROTTLE_TTL`                  | no       | `60000`                 | Rate-limit window in milliseconds                       |
+| `THROTTLE_LIMIT`                | no       | `100`                   | Max requests per window per IP                          |
 
 Configuration is validated at boot — the app refuses to start with an invalid environment.
 
@@ -103,13 +108,17 @@ Configuration is validated at boot — the app refuses to start with an invalid 
 
 Base path: `/api`
 
-| Method | Endpoint        | Auth   | Description                                  | Success |
-| ------ | --------------- | ------ | -------------------------------------------- | ------- |
-| POST   | `/auth/signup`  | —      | Register and receive an access token         | `201`   |
-| POST   | `/auth/signin`  | —      | Authenticate and receive an access token     | `200`   |
-| GET    | `/auth/me`      | Bearer | Get the current authenticated user           | `200`   |
-| GET    | `/health`       | —      | Liveness probe incl. MongoDB connectivity    | `200`   |
-| GET    | `/docs`         | —      | Swagger UI                                   | —       |
+| Method | Endpoint        | Auth          | Description                                            | Success |
+| ------ | --------------- | ------------- | ----------------------------------------------------- | ------- |
+| POST   | `/auth/signup`  | —             | Register; returns access token + sets refresh cookie  | `201`   |
+| POST   | `/auth/signin`  | —             | Authenticate; returns access token + sets cookie      | `200`   |
+| POST   | `/auth/refresh` | Refresh cookie| Rotate refresh token, return a new access token        | `200`   |
+| POST   | `/auth/logout`  | Refresh cookie| Invalidate refresh token and clear the cookie          | `200`   |
+| GET    | `/auth/me`      | Bearer        | Get the current authenticated user                     | `200`   |
+| GET    | `/health`       | —             | Liveness probe incl. MongoDB connectivity              | `200`   |
+| GET    | `/docs`         | —             | Swagger UI                                             | —       |
+
+The access token is returned in the **response body** (kept in memory by the client) and sent as `Authorization: Bearer <token>`. The refresh token is delivered only in an **`HttpOnly` cookie** scoped to `/api/auth` and is **rotated on every `/auth/refresh`** — a previously used token is rejected.
 
 **Password policy:** at least 8 characters, containing a letter, a number and a special character.
 
@@ -171,8 +180,13 @@ easygenerator/
 - **`users` owns persistence, `auth` owns identity.** The auth service never touches the Mongoose model directly — it depends on `UsersService`. Single responsibility, easy to test.
 - **Argon2id** for hashing (memory-hard, OWASP-recommended) wrapped in a small `HashingService` so it can be mocked in unit tests.
 - **Password hash never leaves the server.** The schema sets `select: false`, and responses are explicitly mapped to a safe shape.
-- **Access token only (no refresh token).** The assignment calls for an access token; refresh-token rotation adds meaningful complexity (storage, revocation) that is out of scope.
-- **Token stored in `localStorage` with an Axios interceptor.** Simple, works across tabs, and a response interceptor clears the token and triggers logout on any `401`, which covers expiry gracefully. _Tradeoff:_ `localStorage` is readable by JavaScript, so it is vulnerable to XSS; an `httpOnly` cookie would be more secure but requires CSRF handling and same-site/cookie infrastructure — documented as a deliberate scope choice.
+- **Access + refresh token strategy (production-oriented):**
+  - Short-lived **access token (15 min)** is returned in the response body and held **only in memory** on the client — never in `localStorage`/`sessionStorage`, so it is not exposed to persistent XSS exfiltration.
+  - Long-lived **refresh token (7 days)** is sent in an **`HttpOnly`, `Secure`, `SameSite`** cookie scoped to `/api/auth`, so JavaScript can never read it.
+  - The refresh token is **rotated on every use**; only the Argon2 hash of the current token is stored on the user, which enables revocation (logout) and **reuse detection** (a stale token fails the hash check).
+  - The Axios response interceptor **transparently refreshes** the access token on a `401` and replays the request (single-flight, so concurrent 401s share one refresh). If the refresh itself fails, the client clears state and **redirects to sign-in**.
+  - On reload the access token is gone, so the app **bootstraps the session from the refresh cookie**.
+  - _Tradeoff:_ a single refresh token per user (one active session) keeps the model simple; multi-device sessions would need a sessions collection. Concurrent refreshes from multiple tabs can trip reuse detection — acceptable for this scope.
 - **Validation shared in spirit across the stack.** Zod on the client mirrors the class-validator rules on the server, so users get instant feedback while the server stays the source of truth.
 - **Global `ValidationPipe` + exception filter** guarantee a single, predictable request-validation and error-response shape everywhere.
 
