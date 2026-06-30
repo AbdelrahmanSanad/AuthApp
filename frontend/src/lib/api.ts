@@ -69,10 +69,12 @@ api.interceptors.response.use(
         const token = await refreshAccessToken();
         original.headers.Authorization = `Bearer ${token}`;
         return api(original);
-      } catch (refreshError) {
+      } catch {
+        // The session is gone: notify the app to log out, but reject with the
+        // ORIGINAL error so callers never see the internal refresh failure.
         accessTokenStore.clear();
         window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
-        return Promise.reject(refreshError);
+        return Promise.reject(error);
       }
     }
 
@@ -84,14 +86,24 @@ interface ApiErrorBody {
   message?: string | string[];
 }
 
-/** Turns an Axios error into a single human-readable message for the UI. */
+/**
+ * Turns any error into a single, safe, human-readable message for the UI.
+ * Only trusts our API's JSON `message` shape; a non-JSON, empty, or missing
+ * body falls back to a generic message so raw parser errors or HTML are never
+ * shown to the user.
+ */
 export function getApiErrorMessage(error: unknown, fallback = 'Something went wrong'): string {
   if (axios.isAxiosError<ApiErrorBody>(error)) {
-    const message = error.response?.data?.message;
-    if (Array.isArray(message)) {
-      return message[0] ?? fallback;
+    // No response at all (network error, CORS, timeout, server down).
+    if (!error.response) {
+      return 'Unable to reach the server. Please check your connection and try again.';
     }
-    if (typeof message === 'string') {
+
+    const message = error.response.data?.message;
+    if (Array.isArray(message)) {
+      return typeof message[0] === 'string' ? message[0] : fallback;
+    }
+    if (typeof message === 'string' && message.trim().length > 0) {
       return message;
     }
   }

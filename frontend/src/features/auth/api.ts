@@ -4,13 +4,19 @@ import type { AuthResponse, User } from './types';
 
 /** Pure API layer for auth — no React, no state, just typed HTTP calls. */
 export const authApi = {
+  // A 401 here means bad credentials, not an expired access token, so we opt out
+  // of the refresh interceptor and let the original error reach the caller.
   async signup(input: SignupInput): Promise<AuthResponse> {
-    const { data } = await api.post<AuthResponse>('/auth/signup', input);
+    const { data } = await api.post<AuthResponse>('/auth/signup', input, {
+      skipAuthRefresh: true,
+    });
     return data;
   },
 
   async signin(input: SigninInput): Promise<AuthResponse> {
-    const { data } = await api.post<AuthResponse>('/auth/signin', input);
+    const { data } = await api.post<AuthResponse>('/auth/signin', input, {
+      skipAuthRefresh: true,
+    });
     return data;
   },
 
