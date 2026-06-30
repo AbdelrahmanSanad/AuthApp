@@ -15,7 +15,10 @@ export function SignUpPage() {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<SignupInput>({ resolver: zodResolver(signupSchema) });
+  } = useForm<SignupInput>({
+    resolver: zodResolver(signupSchema),
+    mode: 'onTouched', // validate on blur, then keep fields live as the user fixes them
+  });
 
   const onSubmit = handleSubmit((values) => signup.mutate(values));
   const isBusy = isSubmitting || signup.isPending;
@@ -29,11 +32,14 @@ export function SignUpPage() {
       footerLinkTo={paths.signin}
     >
       <form onSubmit={onSubmit} className="space-y-4" noValidate>
-        {signup.isError && <Alert message={getApiErrorMessage(signup.error)} />}
+        {signup.isError && (
+          <Alert message={getApiErrorMessage(signup.error, 'Could not create your account')} />
+        )}
         <TextField
           label="Name"
           type="text"
           autoComplete="name"
+          autoFocus
           error={errors.name?.message}
           {...register('name')}
         />
@@ -48,6 +54,7 @@ export function SignUpPage() {
           label="Password"
           type="password"
           autoComplete="new-password"
+          hint="At least 8 characters with a letter, a number and a special character."
           error={errors.password?.message}
           {...register('password')}
         />
