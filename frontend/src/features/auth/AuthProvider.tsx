@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { UNAUTHORIZED_EVENT } from '@/lib/api';
+import { accessTokenStore } from '@/lib/access-token-store';
 import { queryClient } from '@/lib/query-client';
-import { tokenStorage } from '@/lib/token-storage';
 import { authApi } from './api';
 import { AuthContext, type AuthContextValue, type AuthStatus } from './context';
 import type { AuthResponse, User } from './types';
@@ -9,46 +9,51 @@ import type { AuthResponse, User } from './types';
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [status, setStatus] = useState<AuthStatus>('loading');
+  const didBootstrap = useRef(false);
 
-  const logout = useCallback(() => {
-    tokenStorage.clear();
+  const login = useCallback((response: AuthResponse) => {
+    accessTokenStore.set(response.accessToken);
+    setUser(response.user);
+    setStatus('authenticated');
+  }, []);
+
+  // Clears local session state only — used when the server session is already gone.
+  const clearSession = useCallback(() => {
+    accessTokenStore.clear();
     queryClient.clear();
     setUser(null);
     setStatus('unauthenticated');
   }, []);
 
-  const login = useCallback((response: AuthResponse) => {
-    tokenStorage.set(response.accessToken);
-    setUser(response.user);
-    setStatus('authenticated');
-  }, []);
+  const logout = useCallback(async () => {
+    try {
+      await authApi.logout();
+    } catch {
+      // The refresh token may already be invalid; clearing locally is enough.
+    }
+    clearSession();
+  }, [clearSession]);
 
-  // Bootstrap: if a token is present, confirm it is still valid by loading the
-  // current user. An expired/invalid token resolves to a clean logged-out state.
+  // Bootstrap: the access token is never persisted, so on load we try to exchange
+  // the HttpOnly refresh cookie for a fresh session. Failure means logged out.
+  // The ref guard avoids a double refresh under StrictMode (which would rotate twice).
   useEffect(() => {
-    if (!tokenStorage.get()) {
-      setStatus('unauthenticated');
+    if (didBootstrap.current) {
       return;
     }
+    didBootstrap.current = true;
 
     authApi
-      .me()
-      .then((current) => {
-        setUser(current);
-        setStatus('authenticated');
-      })
-      .catch(() => {
-        tokenStorage.clear();
-        setUser(null);
-        setStatus('unauthenticated');
-      });
-  }, []);
+      .refresh()
+      .then(login)
+      .catch(() => setStatus('unauthenticated'));
+  }, [login]);
 
-  // The axios interceptor fires this when any request hits a 401.
+  // The axios interceptor fires this when a refresh attempt ultimately fails.
   useEffect(() => {
-    window.addEventListener(UNAUTHORIZED_EVENT, logout);
-    return () => window.removeEventListener(UNAUTHORIZED_EVENT, logout);
-  }, [logout]);
+    window.addEventListener(UNAUTHORIZED_EVENT, clearSession);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, clearSession);
+  }, [clearSession]);
 
   const value = useMemo<AuthContextValue>(
     () => ({ user, status, login, logout }),

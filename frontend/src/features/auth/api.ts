@@ -18,4 +18,17 @@ export const authApi = {
     const { data } = await api.get<User>('/auth/me');
     return data;
   },
+
+  /** Exchanges the refresh cookie for a new session (used on app load). */
+  async refresh(): Promise<AuthResponse> {
+    const { data } = await api.post<AuthResponse>('/auth/refresh', null, {
+      skipAuthRefresh: true,
+    });
+    return data;
+  },
+
+  /** Invalidates the refresh token server-side and clears the cookie. */
+  async logout(): Promise<void> {
+    await api.post('/auth/logout', null, { skipAuthRefresh: true });
+  },
 };
