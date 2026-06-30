@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { AuthResponseDto, UserProfileDto } from './dto/auth-response.dto';
@@ -13,6 +14,8 @@ import { AuthenticatedUser } from './strategies/jwt.strategy';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  // Tighter limits than the global throttler to curb brute-force and spam.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('signup')
   @ApiOperation({ summary: 'Register a new account and receive an access token' })
   @ApiResponse({ status: HttpStatus.CREATED, type: AuthResponseDto })
@@ -21,6 +24,7 @@ export class AuthController {
     return this.authService.signup(dto);
   }
 
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('signin')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Authenticate with email and password' })
