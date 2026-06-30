@@ -17,6 +17,14 @@ export class User {
    */
   @Prop({ required: true, select: false })
   password!: string;
+
+  /**
+   * Argon2 hash of the user's current refresh token. Enables rotation and
+   * revocation: a presented token only validates if it matches this hash.
+   * Null once the user logs out. Never selected by default.
+   */
+  @Prop({ type: String, default: null, select: false })
+  hashedRefreshToken!: string | null;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

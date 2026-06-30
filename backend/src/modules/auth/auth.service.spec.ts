@@ -1,5 +1,6 @@
 import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
@@ -7,7 +8,9 @@ import { HashingService } from './hashing.service';
 
 describe('AuthService', () => {
   let service: AuthService;
-  let users: jest.Mocked<Pick<UsersService, 'findByEmail' | 'findByEmailWithPassword' | 'create'>>;
+  let users: jest.Mocked<
+    Pick<UsersService, 'findByEmail' | 'findByEmailWithPassword' | 'create' | 'setRefreshTokenHash'>
+  >;
   let hashing: jest.Mocked<Pick<HashingService, 'hash' | 'verify'>>;
 
   const userDoc = {
@@ -17,14 +20,22 @@ describe('AuthService', () => {
     password: 'hashed-password',
   };
 
+  const jwtConfig = {
+    accessSecret: 'access-secret',
+    accessExpiresInMinutes: 15,
+    refreshSecret: 'refresh-secret',
+    refreshExpiresInDays: 7,
+  };
+
   beforeEach(async () => {
     users = {
       findByEmail: jest.fn(),
       findByEmailWithPassword: jest.fn(),
       create: jest.fn(),
+      setRefreshTokenHash: jest.fn().mockResolvedValue(undefined),
     };
     hashing = {
-      hash: jest.fn(),
+      hash: jest.fn().mockResolvedValue('hashed-value'),
       verify: jest.fn(),
     };
 
@@ -34,6 +45,7 @@ describe('AuthService', () => {
         { provide: UsersService, useValue: users },
         { provide: HashingService, useValue: hashing },
         { provide: JwtService, useValue: { sign: jest.fn().mockReturnValue('signed-token') } },
+        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue(jwtConfig) } },
       ],
     }).compile();
 
@@ -41,9 +53,8 @@ describe('AuthService', () => {
   });
 
   describe('signup', () => {
-    it('hashes the password and returns a token without exposing the hash', async () => {
+    it('hashes the password, stores a refresh hash, and returns tokens without the password', async () => {
       users.findByEmail.mockResolvedValue(null);
-      hashing.hash.mockResolvedValue('hashed-password');
       users.create.mockResolvedValue(userDoc as never);
 
       const result = await service.signup({
@@ -53,12 +64,9 @@ describe('AuthService', () => {
       });
 
       expect(hashing.hash).toHaveBeenCalledWith('Str0ng!Pass');
-      expect(result.accessToken).toBe('signed-token');
-      expect(result.user).toEqual({
-        id: 'user-id-1',
-        email: 'jane@example.com',
-        name: 'Jane Doe',
-      });
+      expect(users.setRefreshTokenHash).toHaveBeenCalledWith('user-id-1', 'hashed-value');
+      expect(result.tokens).toEqual({ accessToken: 'signed-token', refreshToken: 'signed-token' });
+      expect(result.user).toEqual({ id: 'user-id-1', email: 'jane@example.com', name: 'Jane Doe' });
       expect(result.user).not.toHaveProperty('password');
     });
 
@@ -72,14 +80,14 @@ describe('AuthService', () => {
   });
 
   describe('signin', () => {
-    it('returns a token for valid credentials', async () => {
+    it('returns tokens for valid credentials', async () => {
       users.findByEmailWithPassword.mockResolvedValue(userDoc as never);
       hashing.verify.mockResolvedValue(true);
 
       const result = await service.signin({ email: 'jane@example.com', password: 'Str0ng!Pass' });
 
-      expect(result.accessToken).toBe('signed-token');
-      expect(result.user.email).toBe('jane@example.com');
+      expect(result.tokens.accessToken).toBe('signed-token');
+      expect(users.setRefreshTokenHash).toHaveBeenCalled();
     });
 
     it('rejects an unknown email', async () => {
@@ -97,6 +105,26 @@ describe('AuthService', () => {
       await expect(
         service.signin({ email: 'jane@example.com', password: 'wrong' }),
       ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+  });
+
+  describe('refresh', () => {
+    it('rotates the refresh token and returns a new pair', async () => {
+      const result = await service.refresh({
+        id: 'user-id-1',
+        email: 'jane@example.com',
+        name: 'Jane Doe',
+      });
+
+      expect(users.setRefreshTokenHash).toHaveBeenCalledWith('user-id-1', 'hashed-value');
+      expect(result.tokens.accessToken).toBe('signed-token');
+    });
+  });
+
+  describe('logout', () => {
+    it('clears the stored refresh hash', async () => {
+      await service.logout('user-id-1');
+      expect(users.setRefreshTokenHash).toHaveBeenCalledWith('user-id-1', null);
     });
   });
 });

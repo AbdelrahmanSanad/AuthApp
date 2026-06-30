@@ -33,4 +33,14 @@ export class UsersService {
   findById(id: string): Promise<UserDocument | null> {
     return this.userModel.findById(id).exec();
   }
+
+  /** Includes the refresh-token hash, needed only to validate a refresh request. */
+  findByIdWithRefreshToken(id: string): Promise<UserDocument | null> {
+    return this.userModel.findById(id).select('+hashedRefreshToken').exec();
+  }
+
+  /** Stores (or clears, with null) the hash of the user's current refresh token. */
+  async setRefreshTokenHash(id: string, hashedRefreshToken: string | null): Promise<void> {
+    await this.userModel.updateOne({ _id: id }, { hashedRefreshToken }).exec();
+  }
 }

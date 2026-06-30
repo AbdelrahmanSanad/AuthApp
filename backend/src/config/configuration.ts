@@ -8,8 +8,14 @@ export interface AppConfig {
   corsOrigin: string[];
   mongodbUri: string;
   jwt: {
-    secret: string;
-    expiresIn: string;
+    accessSecret: string;
+    accessExpiresInMinutes: number;
+    refreshSecret: string;
+    refreshExpiresInDays: number;
+  };
+  cookie: {
+    secure: boolean;
+    sameSite: 'lax' | 'strict' | 'none';
   };
   throttle: {
     ttl: number;
@@ -17,20 +23,33 @@ export interface AppConfig {
   };
 }
 
-export default (): AppConfig => ({
-  nodeEnv: process.env.NODE_ENV ?? 'development',
-  port: parseInt(process.env.PORT ?? '3000', 10),
-  corsOrigin: (process.env.CORS_ORIGIN ?? 'http://localhost:5173')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean),
-  mongodbUri: process.env.MONGODB_URI as string,
-  jwt: {
-    secret: process.env.JWT_SECRET as string,
-    expiresIn: process.env.JWT_EXPIRES_IN ?? '1h',
-  },
-  throttle: {
-    ttl: parseInt(process.env.THROTTLE_TTL ?? '60000', 10),
-    limit: parseInt(process.env.THROTTLE_LIMIT ?? '100', 10),
-  },
-});
+const toBool = (value: string | undefined, fallback: boolean): boolean =>
+  value === undefined ? fallback : value === 'true';
+
+export default (): AppConfig => {
+  const nodeEnv = process.env.NODE_ENV ?? 'development';
+  return {
+    nodeEnv,
+    port: parseInt(process.env.PORT ?? '3000', 10),
+    corsOrigin: (process.env.CORS_ORIGIN ?? 'http://localhost:5173')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+    mongodbUri: process.env.MONGODB_URI as string,
+    jwt: {
+      accessSecret: process.env.JWT_ACCESS_SECRET as string,
+      accessExpiresInMinutes: parseInt(process.env.JWT_ACCESS_EXPIRES_IN_MINUTES ?? '15', 10),
+      refreshSecret: process.env.JWT_REFRESH_SECRET as string,
+      refreshExpiresInDays: parseInt(process.env.JWT_REFRESH_EXPIRES_IN_DAYS ?? '7', 10),
+    },
+    cookie: {
+      // Default to secure cookies in production; disable over plain HTTP (local/dev).
+      secure: toBool(process.env.COOKIE_SECURE, nodeEnv === 'production'),
+      sameSite: (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') ?? 'lax',
+    },
+    throttle: {
+      ttl: parseInt(process.env.THROTTLE_TTL ?? '60000', 10),
+      limit: parseInt(process.env.THROTTLE_LIMIT ?? '100', 10),
+    },
+  };
+};
